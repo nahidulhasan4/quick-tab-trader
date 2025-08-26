@@ -1,3 +1,9 @@
+export interface ProductOption {
+  id: string;
+  name: string;
+  priceModifier: number; // Amount to add/subtract from base price
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -5,12 +11,15 @@ export interface Product {
   image: string;
   category: string;
   description?: string;
+  options?: ProductOption[];
 }
 
 export interface OrderItem {
   productId: string;
   product: Product;
   quantity: number;
+  selectedOptions?: ProductOption[];
+  finalPrice: number; // Base price + options
   notes?: string;
 }
 

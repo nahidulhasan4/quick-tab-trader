@@ -1,22 +1,27 @@
 import { useState, useMemo } from "react";
-import { Product, Table, OrderItem, Bill } from "@/types/pos";
+import { Product, Table, OrderItem, Bill, ProductOption } from "@/types/pos";
 import { sampleProducts, initialTables } from "@/data/sampleData";
 import { POSHeader } from "@/components/pos/POSHeader";
 import { ProductCard } from "@/components/pos/ProductCard";
 import { TableCard } from "@/components/pos/TableCard";
 import { OrderPanel } from "@/components/pos/OrderPanel";
 import { BillModal } from "@/components/pos/BillModal";
+import { ProductManagementModal } from "@/components/pos/ProductManagementModal";
+import { ProductOptionsModal } from "@/components/pos/ProductOptionsModal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
 
 export default function POSDashboard() {
-  const [products] = useState<Product[]>(sampleProducts);
+  const [products, setProducts] = useState<Product[]>(sampleProducts);
   const [tables, setTables] = useState<Table[]>(initialTables);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentBill, setCurrentBill] = useState<Bill | null>(null);
   const [isBillModalOpen, setIsBillModalOpen] = useState(false);
+  const [isProductManagementOpen, setIsProductManagementOpen] = useState(false);
+  const [selectedProductForOptions, setSelectedProductForOptions] = useState<Product | null>(null);
+  const [isOptionsModalOpen, setIsOptionsModalOpen] = useState(false);
   const { toast } = useToast();
 
   const categories = useMemo(() => {
@@ -33,7 +38,16 @@ export default function POSDashboard() {
 
   const occupiedTables = tables.filter(t => t.status === 'occupied').length;
 
-  const addProductToTable = (product: Product, tableId?: string) => {
+  const handleProductClick = (product: Product) => {
+    if (product.options && product.options.length > 0) {
+      setSelectedProductForOptions(product);
+      setIsOptionsModalOpen(true);
+    } else {
+      addProductToTable(product, [], product.price);
+    }
+  };
+
+  const addProductToTable = (product: Product, selectedOptions: ProductOption[] = [], finalPrice?: number, tableId?: string) => {
     const targetTableId = tableId || selectedTable?.id;
     if (!targetTableId) {
       toast({
@@ -44,14 +58,22 @@ export default function POSDashboard() {
       return;
     }
 
+    const price = finalPrice || product.price;
+    const optionsKey = selectedOptions.map(opt => opt.id).sort().join(',');
+    const uniqueItemId = `${product.id}-${optionsKey}`;
+
     setTables(prev => prev.map(table => {
       if (table.id === targetTableId) {
-        const existingItem = table.items.find(item => item.productId === product.id);
+        const existingItem = table.items.find(item => 
+          item.productId === product.id && 
+          (item.selectedOptions?.map(opt => opt.id).sort().join(',') || '') === optionsKey
+        );
         
         let updatedItems: OrderItem[];
         if (existingItem) {
           updatedItems = table.items.map(item =>
-            item.productId === product.id
+            item.productId === product.id && 
+            (item.selectedOptions?.map(opt => opt.id).sort().join(',') || '') === optionsKey
               ? { ...item, quantity: item.quantity + 1 }
               : item
           );
@@ -59,12 +81,14 @@ export default function POSDashboard() {
           updatedItems = [...table.items, {
             productId: product.id,
             product,
-            quantity: 1
+            quantity: 1,
+            selectedOptions,
+            finalPrice: price
           }];
         }
 
         const total = updatedItems.reduce((sum, item) => 
-          sum + (item.product.price * item.quantity), 0
+          sum + (item.finalPrice * item.quantity), 0
         );
 
         return {
@@ -85,9 +109,13 @@ export default function POSDashboard() {
       }
     }
 
+    const optionsText = selectedOptions.length > 0 
+      ? ` with ${selectedOptions.map(opt => opt.name).join(', ')}`
+      : '';
+    
     toast({
       title: "Item added",
-      description: `${product.name} added to the order`
+      description: `${product.name}${optionsText} added to the order`
     });
   };
 
@@ -106,7 +134,7 @@ export default function POSDashboard() {
         );
         
         const total = updatedItems.reduce((sum, item) => 
-          sum + (item.product.price * item.quantity), 0
+          sum + (item.finalPrice * item.quantity), 0
         );
 
         const updatedTable = { ...table, items: updatedItems, total };
@@ -124,7 +152,7 @@ export default function POSDashboard() {
       if (table.id === selectedTable.id) {
         const updatedItems = table.items.filter(item => item.productId !== productId);
         const total = updatedItems.reduce((sum, item) => 
-          sum + (item.product.price * item.quantity), 0
+          sum + (item.finalPrice * item.quantity), 0
         );
 
         const status: Table['status'] = updatedItems.length === 0 ? 'available' : 'occupied';
@@ -160,7 +188,7 @@ export default function POSDashboard() {
     if (!targetTable || targetTable.items.length === 0) return;
 
     const subtotal = targetTable.items.reduce((sum, item) => 
-      sum + (item.product.price * item.quantity), 0
+      sum + (item.finalPrice * item.quantity), 0
     );
     const tax = subtotal * 0.1;
     const total = subtotal + tax;
@@ -229,10 +257,7 @@ export default function POSDashboard() {
         onSearchChange={setSearchTerm}
         totalTables={tables.length}
         occupiedTables={occupiedTables}
-        onManageProducts={() => toast({
-          title: "Feature coming soon",
-          description: "Product management will be available soon"
-        })}
+        onManageProducts={() => setIsProductManagementOpen(true)}
       />
 
       <div className="flex">
@@ -280,7 +305,7 @@ export default function POSDashboard() {
                             <ProductCard
                               key={product.id}
                               product={product}
-                              onAddToOrder={(product) => addProductToTable(product)}
+                              onAddToOrder={() => handleProductClick(product)}
                             />
                           ))}
                       </div>
@@ -310,6 +335,20 @@ export default function POSDashboard() {
         isOpen={isBillModalOpen}
         onClose={() => setIsBillModalOpen(false)}
         onMarkPaid={markBillPaid}
+      />
+
+      <ProductManagementModal
+        isOpen={isProductManagementOpen}
+        onClose={() => setIsProductManagementOpen(false)}
+        products={products}
+        onUpdateProducts={setProducts}
+      />
+
+      <ProductOptionsModal
+        isOpen={isOptionsModalOpen}
+        onClose={() => setIsOptionsModalOpen(false)}
+        product={selectedProductForOptions}
+        onAddToOrder={addProductToTable}
       />
     </div>
   );
